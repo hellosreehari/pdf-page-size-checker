@@ -16,8 +16,9 @@ THRESHOLD_BYTES = THRESHOLD_KB * 1024
 # Target ceiling slightly below 102400 to guarantee page_size_kb < 100.00 KB
 TARGET_CEILING_BYTES = 101800
 
-# Temporary in-memory store for optimized PDFs awaiting download
-_downloads: dict = {}
+# File-based store for optimized PDFs awaiting download (works across multiple Gunicorn workers)
+DOWNLOAD_DIR = os.path.join(tempfile.gettempdir(), "pdf_downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +72,16 @@ def optimize():
 
     dl_id = uuid.uuid4().hex
     name_stem = os.path.splitext(original_name)[0]
-    _downloads[dl_id] = {
-        "bytes": pdf_bytes,
-        "filename": f"{name_stem}_optimized.pdf",
-        "created": time.time(),
-    }
+    filename = f"{name_stem}_optimized.pdf"
+
+    # Save to disk so any Gunicorn worker can serve the download
+    pdf_path = os.path.join(DOWNLOAD_DIR, f"{dl_id}.pdf")
+    meta_path = os.path.join(DOWNLOAD_DIR, f"{dl_id}.name")
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        f.write(filename)
+
     _cleanup_downloads()
 
     return jsonify({
@@ -87,15 +93,25 @@ def optimize():
 
 @app.route("/download/<dl_id>")
 def download(dl_id):
-    entry = _downloads.get(dl_id)
-    if not entry:
+    pdf_path = os.path.join(DOWNLOAD_DIR, f"{dl_id}.pdf")
+    meta_path = os.path.join(DOWNLOAD_DIR, f"{dl_id}.name")
+
+    if not os.path.isfile(pdf_path):
         return jsonify({"error": "Download expired or not found"}), 404
 
+    filename = "optimized.pdf"
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                filename = f.read().strip() or filename
+        except Exception:
+            pass
+
     return send_file(
-        io.BytesIO(entry["bytes"]),
+        pdf_path,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=entry["filename"],
+        download_name=filename,
     )
 
 
@@ -115,10 +131,18 @@ def _validate_upload():
 
 
 def _cleanup_downloads(max_age_s=900):
+    """Remove download files older than max_age_s."""
     now = time.time()
-    expired = [k for k, v in _downloads.items() if now - v["created"] > max_age_s]
-    for k in expired:
-        del _downloads[k]
+    try:
+        for fname in os.listdir(DOWNLOAD_DIR):
+            fpath = os.path.join(DOWNLOAD_DIR, fname)
+            if os.path.isfile(fpath) and (now - os.path.getmtime(fpath) > max_age_s):
+                try:
+                    os.unlink(fpath)
+                except OSError:
+                    pass
+    except Exception:
+        pass
 
 
 def _measure_page(doc, page_num: int) -> int:
@@ -359,4 +383,5 @@ def _compress_page(src_doc: pymupdf.Document, page_num: int) -> pymupdf.Document
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
