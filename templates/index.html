@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Page Size Checker</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --green: #22c55e;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --green-bg: #052e16;
+      --red-bg: #350a0a;
+      --amber-bg: #451a03;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.25rem; }
+
+    .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+
+    /* ---- Upload area ---- */
+    .upload-area {
+      width: 100%; max-width: 600px;
+      border: 2px dashed var(--border); border-radius: 12px;
+      padding: 3rem 2rem; text-align: center; cursor: pointer;
+      transition: border-color .2s, background .2s;
+      background: var(--surface);
+    }
+    .upload-area:hover, .upload-area.drag-over {
+      border-color: var(--accent); background: rgba(59,130,246,.05);
+    }
+    .upload-area svg { width: 48px; height: 48px; stroke: var(--muted); margin-bottom: 1rem; }
+    .upload-area p { color: var(--muted); font-size: .95rem; }
+    .upload-area p span { color: var(--accent); text-decoration: underline; cursor: pointer; }
+    #fileInput { display: none; }
+
+    /* ---- Loader ---- */
+    .loader {
+      display: none; margin: 2rem auto;
+      width: 36px; height: 36px;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .7s linear infinite;
+    }
+    .loader-label { display: none; text-align: center; color: var(--muted); font-size: .85rem; margin-top: -.8rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Results container ---- */
+    .results { display: none; width: 100%; max-width: 600px; margin-top: 2rem; }
+
+    /* ---- Summary card ---- */
+    .summary {
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--surface); border-radius: 10px;
+      padding: 1rem 1.25rem; margin-bottom: 1rem; gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .summary .filename { font-weight: 600; font-size: 1rem; word-break: break-all; }
+    .summary .meta { color: var(--muted); font-size: .85rem; }
+
+    .badge {
+      display: inline-block; padding: .3rem .75rem; border-radius: 999px;
+      font-weight: 600; font-size: .8rem; white-space: nowrap;
+    }
+    .badge.pass  { background: var(--green-bg); color: var(--green); }
+    .badge.fail  { background: var(--red-bg);   color: var(--red); }
+
+    /* ---- Table ---- */
+    .page-table {
+      width: 100%; border-collapse: collapse;
+      background: var(--surface); border-radius: 10px; overflow: hidden;
+    }
+    .page-table th, .page-table td { text-align: left; padding: .65rem 1rem; }
+    .page-table th {
+      background: rgba(255,255,255,.04); color: var(--muted);
+      font-size: .75rem; text-transform: uppercase; letter-spacing: .05em;
+    }
+    .page-table tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+    .page-table td.size { font-variant-numeric: tabular-nums; }
+
+    .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+    .status-dot.ok   { background: var(--green); }
+    .status-dot.over { background: var(--red); }
+
+    .reduction { color: var(--green); font-size: .85rem; }
+
+    /* ---- Buttons ---- */
+    .btn-row { display: flex; gap: .75rem; margin-top: 1.25rem; flex-wrap: wrap; }
+
+    .btn {
+      padding: .55rem 1.3rem; border-radius: 8px; cursor: pointer;
+      font-size: .9rem; border: none; transition: filter .15s, opacity .15s;
+    }
+    .btn:hover { filter: brightness(1.15); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; filter: none; }
+
+    .btn-primary   { background: var(--accent); color: #fff; font-weight: 600; }
+    .btn-secondary {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--text); }
+
+    .btn-download  { background: var(--green); color: #fff; font-weight: 600; }
+
+    /* ---- Error ---- */
+    .error-msg {
+      display: none; background: var(--red-bg); color: var(--red);
+      padding: .8rem 1.2rem; border-radius: 10px; margin-top: 1rem;
+      max-width: 600px; width: 100%; text-align: center;
+    }
+
+    /* ---- Opt summary ---- */
+    .opt-summary {
+      display: none; background: var(--surface); border-radius: 10px;
+      padding: 1rem 1.25rem; margin-bottom: 1rem;
+    }
+    .opt-summary h3 { font-size: .95rem; margin-bottom: .35rem; }
+    .opt-summary .stat-row { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .opt-summary .stat { color: var(--muted); font-size: .85rem; }
+    .opt-summary .stat b { color: var(--text); }
+  </style>
+</head>
+<body>
+  <h1>📄 PDF Page Size Checker</h1>
+  <p class="subtitle">Upload a PDF to check whether each page is under 100 KB</p>
+
+  <!-- Upload zone -->
+  <div class="upload-area" id="dropZone">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+    </svg>
+    <p>Drag &amp; drop a PDF here, or <span>browse</span></p>
+  </div>
+  <input type="file" id="fileInput" accept=".pdf,application/pdf" />
+
+  <!-- Loader -->
+  <div class="loader" id="loader"></div>
+  <p class="loader-label" id="loaderLabel">Analysing…</p>
+
+  <!-- Error -->
+  <div class="error-msg" id="errorMsg"></div>
+
+  <!-- Results -->
+  <div class="results" id="results">
+    <div class="summary" id="summary"></div>
+
+    <!-- Optimisation summary (shown after optimise) -->
+    <div class="opt-summary" id="optSummary"></div>
+
+    <table class="page-table">
+      <thead id="tableHead">
+        <tr>
+          <th>Page</th>
+          <th>Size</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+
+    <div class="btn-row" id="btnRow">
+      <button class="btn btn-primary" id="optimizeBtn" style="display:none">⚡ Optimize &amp; Download</button>
+      <a class="btn btn-download" id="downloadBtn" style="display:none" href="#">⬇ Download Optimized PDF</a>
+      <button class="btn btn-secondary" id="resetBtn">Upload another PDF</button>
+    </div>
+  </div>
+
+  <script>
+    /* ---- DOM refs ---- */
+    const dropZone     = document.getElementById("dropZone");
+    const fileInput    = document.getElementById("fileInput");
+    const loader       = document.getElementById("loader");
+    const loaderLabel  = document.getElementById("loaderLabel");
+    const errorMsg     = document.getElementById("errorMsg");
+    const results      = document.getElementById("results");
+    const summary      = document.getElementById("summary");
+    const optSummary   = document.getElementById("optSummary");
+    const tableHead    = document.getElementById("tableHead");
+    const tableBody    = document.getElementById("tableBody");
+    const optimizeBtn  = document.getElementById("optimizeBtn");
+    const downloadBtn  = document.getElementById("downloadBtn");
+    const resetBtn     = document.getElementById("resetBtn");
+
+    let currentFile = null;   // remember the file for optimisation re-upload
+
+    /* ---- Upload zone events ---- */
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault(); dropZone.classList.remove("drag-over");
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+    resetBtn.addEventListener("click", () => {
+      results.style.display = "none";
+      errorMsg.style.display = "none";
+      optSummary.style.display = "none";
+      optimizeBtn.style.display = "none";
+      downloadBtn.style.display = "none";
+      dropZone.style.display = "block";
+      fileInput.value = "";
+      currentFile = null;
+    });
+
+    optimizeBtn.addEventListener("click", handleOptimize);
+
+    /* ---- Upload & Analyse ---- */
+    async function handleFile(file) {
+      if (!file.name.toLowerCase().endsWith(".pdf")) { showError("Please upload a PDF file."); return; }
+
+      currentFile = file;
+      showLoader("Analysing…");
+      dropZone.style.display = "none";
+      results.style.display = "none";
+      errorMsg.style.display = "none";
+
+      const form = new FormData();
+      form.append("pdf", file);
+
+      try {
+        const res  = await fetch("/upload", { method: "POST", body: form });
+        const data = await res.json();
+        if (!res.ok) { showError(data.error || "Something went wrong."); return; }
+        renderAnalysis(file.name, data);
+      } catch { showError("Upload failed – is the server running?"); }
+      finally { hideLoader(); }
+    }
+
+    /* ---- Render analysis results ---- */
+    function renderAnalysis(name, data) {
+      const passCount = data.pages.filter(p => p.under_limit).length;
+      const failCount = data.total_pages - passCount;
+
+      summary.innerHTML = `
+        <div>
+          <div class="filename">${esc(name)}</div>
+          <div class="meta">${data.total_pages} page${s(data.total_pages)} · ${data.total_size_kb} KB total</div>
+        </div>
+        <span class="badge ${data.all_pass ? "pass" : "fail"}">
+          ${data.all_pass
+            ? "✓ All pages under 100 KB"
+            : `✗ ${failCount} page${s(failCount)} over limit`}
+        </span>`;
+
+      tableHead.innerHTML = `<tr><th>Page</th><th>Size</th><th>Status</th></tr>`;
+      tableBody.innerHTML = data.pages.map(p => `
+        <tr>
+          <td>${p.page}</td>
+          <td class="size">${p.size_kb} KB</td>
+          <td><span class="status-dot ${p.under_limit ? "ok" : "over"}"></span> ${p.under_limit ? "OK" : "Over"}</td>
+        </tr>`).join("");
+
+      optSummary.style.display = "none";
+      downloadBtn.style.display = "none";
+      optimizeBtn.style.display = data.all_pass ? "none" : "inline-flex";
+      optimizeBtn.disabled = false;
+      optimizeBtn.textContent = "⚡ Optimize & Download";
+      results.style.display = "block";
+    }
+
+    /* ---- Optimize ---- */
+    async function handleOptimize() {
+      if (!currentFile) return;
+
+      optimizeBtn.disabled = true;
+      optimizeBtn.textContent = "Optimizing…";
+      showLoader("Compressing pages…");
+
+      const form = new FormData();
+      form.append("pdf", currentFile);
+
+      try {
+        const res  = await fetch("/optimize", { method: "POST", body: form });
+        const data = await res.json();
+        if (!res.ok) { showError(data.error || "Optimisation failed."); return; }
+
+        renderOptResults(data);
+
+        // Auto-trigger download
+        if (data.download_id) {
+          downloadBtn.href = `/download/${data.download_id}`;
+          downloadBtn.style.display = "inline-flex";
+          downloadBtn.click();
+        }
+      } catch { showError("Optimisation request failed."); }
+      finally { hideLoader(); }
+    }
+
+    /* ---- Render optimisation results ---- */
+    function renderOptResults(data) {
+      const totalOrigKB = data.pages.reduce((s, p) => s + p.original_kb, 0);
+      const totalOptKB  = data.pages.reduce((s, p) => s + p.optimized_kb, 0);
+      const saved       = totalOrigKB - totalOptKB;
+      const pagesOpt    = data.pages.filter(p => p.optimized).length;
+
+      const allOk = data.all_under_limit;
+      summary.querySelector(".badge").className = `badge ${allOk ? "pass" : "fail"}`;
+      summary.querySelector(".badge").textContent = allOk
+        ? "✓ All pages under 100 KB"
+        : "⚠ Some pages could not be reduced";
+
+      optSummary.innerHTML = `
+        <h3>Optimisation Results</h3>
+        <div class="stat-row">
+          <span class="stat"><b>${pagesOpt}</b> page${s(pagesOpt)} compressed</span>
+          <span class="stat">Saved <b>${saved.toFixed(1)} KB</b> per-page total</span>
+        </div>`;
+      optSummary.style.display = "block";
+
+      tableHead.innerHTML = `<tr><th>Page</th><th>Original</th><th>Optimized</th><th>Status</th></tr>`;
+      tableBody.innerHTML = data.pages.map(p => {
+        const diff = p.original_kb - p.optimized_kb;
+        const pct  = p.original_kb > 0 ? ((diff / p.original_kb) * 100).toFixed(0) : 0;
+        const tag  = p.optimized
+          ? `<span class="reduction">−${diff.toFixed(1)} KB (${pct}%)</span>`
+          : "";
+        return `
+          <tr>
+            <td>${p.page}</td>
+            <td class="size">${p.original_kb} KB</td>
+            <td class="size">${p.optimized_kb} KB ${tag}</td>
+            <td><span class="status-dot ${p.under_limit ? "ok" : "over"}"></span> ${p.under_limit ? "OK" : "Over"}</td>
+          </tr>`;
+      }).join("");
+
+      optimizeBtn.style.display = "none";
+      results.style.display = "block";
+    }
+
+    /* ---- Utilities ---- */
+    function showLoader(text) { loader.style.display = "block"; loaderLabel.textContent = text; loaderLabel.style.display = "block"; }
+    function hideLoader()     { loader.style.display = "none";  loaderLabel.style.display = "none"; }
+
+    function showError(msg) {
+      hideLoader();
+      errorMsg.textContent = msg;
+      errorMsg.style.display = "block";
+      dropZone.style.display = "block";
+    }
+
+    function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+    function s(n) { return n !== 1 ? "s" : ""; }
+  </script>
+</body>
+</html>
